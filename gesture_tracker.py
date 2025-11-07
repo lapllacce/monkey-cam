@@ -224,28 +224,27 @@ class GestureTracker:
         middle_tip = hand_landmarks[12]    # Ponta do dedo médio
         
         # ========================================
-        # GESTO 1: Dedo no Canto da Boca
+        # GESTO 1: Dedo no Canto da Boca (SIMPLIFICADO)
         # ========================================
-        # Condições:
+        # Condições mais flexíveis para facilitar detecção:
         #   - Indicador levantado
-        #   - Mão próxima ao rosto (parte superior da tela)
-        #   - Mão não está muito esticada
-        #   - Poucos dedos levantados (1 ou 2)
+        #   - Até 3 dedos levantados (mais tolerante)
+        #   - Mão na parte superior ou média da tela
+        #   - Se não for claramente o gesto "finger_up"
         
-        dist_index_wrist_y = abs(index_tip.y - wrist.y)  # Distância vertical
-        
-        if (fingers[1] == 1 and                    # Indicador levantado
-            index_tip.y < 0.6 and                  # Parte superior/média (Y < 0.6)
-            dist_index_wrist_y < 0.4 and           # Mão não muito esticada
-            fingers_count <= 2):                   # Máximo 2 dedos levantados
-            return "finger_mouth"
+        if fingers[1] == 1 and fingers_count <= 3:  # Indicador levantado com até 3 dedos
+            # Não é o gesto finger_up (que tem o dedo BEM esticado para cima)
+            is_finger_up = (fingers == [0, 1, 0, 0, 0] and index_tip.y < wrist.y - 0.2)
+            
+            if not is_finger_up and index_tip.y < 0.7:  # Não é finger_up E está na metade superior
+                return "finger_mouth"
         
         # ========================================
         # GESTO 2: Dedo Indicador Para Cima
         # ========================================
         # Condições:
         #   - Apenas indicador levantado
-        #   - Indicador apontando para cima (acima do pulso)
+        #   - Indicador apontando bem para cima (acima do pulso)
         
         if (fingers == [0, 1, 0, 0, 0] and         # Só indicador levantado
             index_tip.y < wrist.y - 0.2):          # Bem acima do pulso
@@ -459,6 +458,17 @@ class GestureTracker:
         print("=" * 60 + "\n")
         
         # ========================================
+        # Configurar Janelas
+        # ========================================
+        # Criar janelas nomeadas
+        cv2.namedWindow('Camera - Rastreador de Gestos', cv2.WINDOW_NORMAL)
+        cv2.namedWindow('Macaco - Gesto Detectado', cv2.WINDOW_NORMAL)
+        
+        # Posicionar janelas lado a lado
+        cv2.moveWindow('Camera - Rastreador de Gestos', 50, 100)    # Janela da esquerda
+        cv2.moveWindow('Macaco - Gesto Detectado', 750, 100)        # Janela da direita
+        
+        # ========================================
         # Loop Principal
         # ========================================
         while cap.isOpened():
@@ -526,21 +536,74 @@ class GestureTracker:
                 self.current_gesture = "neutral"
             
             # ========================================
-            # Exibir Imagem do Macaco
+            # Exibir Frame da Câmera
+            # ========================================
+            cv2.imshow('Camera - Rastreador de Gestos', image)
+            
+            # ========================================
+            # Exibir Imagem do Macaco em Janela Separada
             # ========================================
             if self.current_gesture in self.monkey_images:
                 monkey_img = self.monkey_images[self.current_gesture]
                 
-                # Posicionar no canto superior direito
-                x_offset = image.shape[1] - 320  # 20px de margem
-                y_offset = 10                     # 10px do topo
+                # Criar imagem maior para melhor visualização
+                display_size = (600, 600)  # Tamanho maior: 600x600 pixels
+                monkey_display = cv2.resize(monkey_img, display_size)
                 
-                image = self.overlay_image(image, monkey_img, x_offset, y_offset)
-            
-            # ========================================
-            # Exibir Frame
-            # ========================================
-            cv2.imshow('Rastreador de Gestos com Macaco 🐒', image)
+                # Adicionar fundo branco se a imagem tiver canal alpha
+                if monkey_display.shape[2] == 4:
+                    # Criar fundo branco
+                    background = np.ones((display_size[1], display_size[0], 3), dtype=np.uint8) * 255
+                    
+                    # Aplicar transparência
+                    alpha = monkey_display[:, :, 3] / 255.0
+                    for c in range(3):
+                        background[:, :, c] = (
+                            alpha * monkey_display[:, :, c] +
+                            (1 - alpha) * background[:, :, c]
+                        )
+                    monkey_display = background
+                
+                # Adicionar texto com o nome do gesto
+                gesture_names = {
+                    "neutral": "Neutro",
+                    "finger_mouth": "Dedo no Canto da Boca",
+                    "finger_up": "Dedo Indicador Para Cima",
+                    "hand_chest": "Mao no Peito"
+                }
+                
+                gesture_text = gesture_names.get(self.current_gesture, self.current_gesture)
+                
+                # Adicionar barra preta no topo para o texto
+                text_bar = np.zeros((60, display_size[0], 3), dtype=np.uint8)
+                cv2.putText(
+                    text_bar,
+                    gesture_text,
+                    (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.2,
+                    (255, 255, 255),
+                    2
+                )
+                
+                # Concatenar barra de texto com a imagem
+                final_display = np.vstack([text_bar, monkey_display])
+                
+                # Exibir em janela separada
+                cv2.imshow('Macaco - Gesto Detectado', final_display)
+            else:
+                # Se não houver gesto, mostrar mensagem
+                blank = np.ones((660, 600, 3), dtype=np.uint8) * 200
+                cv2.putText(
+                    blank,
+                    "Aguardando gesto...",
+                    (150, 330),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.2,
+                    (100, 100, 100),
+                    2
+                )
+                cv2.imshow('Macaco - Gesto Detectado', blank)
             
             # ========================================
             # Verificar Tecla Pressionada
